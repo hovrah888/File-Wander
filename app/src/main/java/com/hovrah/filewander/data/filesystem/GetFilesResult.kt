@@ -1,11 +1,11 @@
 package com.hovrah.filewander.data.filesystem
 
 // состояния для получения списка файлов
-sealed interface GetFilesResult {
+sealed class GetFilesResult {
 
-    data class Success(val files: List<FileItem>) : GetFilesResult
+    data class Success(val files: List<FileItem>) : GetFilesResult()
 
-    sealed class Error : GetFilesResult {
+    sealed class Error : GetFilesResult() {
         data object DirectoryNotFound : Error()
         data object PermissionDenied : Error()
         data object NotADirectory : Error()
