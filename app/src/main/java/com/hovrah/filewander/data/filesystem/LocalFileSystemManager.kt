@@ -6,13 +6,14 @@ import java.io.File
 
 // extension-функция для перезаписи "сырого" File -> FileItem
 fun File.toFileItem(): FileItem {
+    val isDir = this.isDirectory
     return FileItem(
         file = this,
         name = this.name,
-        size = if (isDirectory) 0 else this.length(), // для директорий длина обычно не определена
-        extension = if (this.isDirectory) "" else this.extension, // расширение файла
+        size = if (isDir) 0 else this.length(), // для директорий длина обычно не определена
+        extension = if (isDir) "" else this.extension, // расширение файла
         lastModified = this.lastModified(), // время последнего изменения
-        isDirectory = this.isDirectory
+        isDirectory = isDir
     )
 }
 
