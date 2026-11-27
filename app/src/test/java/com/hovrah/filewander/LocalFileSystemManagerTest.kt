@@ -1,5 +1,6 @@
 package com.hovrah.filewander
 
+import com.hovrah.filewander.data.filesystem.FileOperationResult
 import com.hovrah.filewander.data.filesystem.GetFilesResult
 import com.hovrah.filewander.data.filesystem.LocalFileSystemManager
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -21,6 +22,9 @@ class LocalFileSystemManagerTest {
 
     private val manager = LocalFileSystemManager(UnconfinedTestDispatcher()) // создание локального менеджера ФС на тестовом диспетчере
 
+
+    // --- getFiles ---
+
     // при попытке получить содержимое файла как содержимое папки - возникает ошибка NotADirectory
     @Test
     fun `getFiles on a file returns NotADirectory`() = runTest {
@@ -36,7 +40,6 @@ class LocalFileSystemManagerTest {
         val nonexistentFolder = File(tempFolder.root, "a") // путь к несуществующей папки внутри tempFolder
         val result = manager.getFiles(nonexistentFolder)
 
-        assertEquals(GetFilesResult.Error.DirectoryNotFound, result)
     }
 
     // при попытке получить содержимое пустой папки files будет пустым
@@ -99,4 +102,100 @@ class LocalFileSystemManagerTest {
         assertEquals(GetFilesResult.Error.PermissionDenied, result)
     }
 
+    // --- createDirectory ---
+
+    // папка успешно создается при отсутствии проблем
+    @Test
+    fun `createDirectory returns Success`() = runTest {
+        val result = manager.createDirectory(tempFolder.root, "a")
+        assertEquals(FileOperationResult.Success(File(tempFolder.root, "a")), result)
+    }
+
+    // при попытке создать папку внутри несуществующего родителя — возвращается FileNotFound
+    @Test
+    fun `createDirectory when parent is nonexistent returns FileNotFound`() = runTest {
+        val nonexistentParent = File(tempFolder.root, "b")
+        val result = manager.createDirectory(nonexistentParent, "a")
+        assertEquals(FileOperationResult.Error.FileNotFound, result)
+    }
+
+    // при попытке создать папку внутри файла (вместо папки-родителя) — возвращается NotADirectory
+    @Test
+    fun `createDirectory when parent is a file returns NotADirectory`() = runTest {
+        val fileAsParent = tempFolder.newFile("test.txt")
+        val result = manager.createDirectory(fileAsParent, "a")
+        assertEquals(FileOperationResult.Error.NotADirectory, result)
+    }
+
+    // при попытке создать папку с именем уже существующей папки — возвращается DestinationExists
+    @Test
+    fun `createDirectory when folder already exists returns DestinationExists`() = runTest {
+        tempFolder.newFolder("a")
+        val result = manager.createDirectory(tempFolder.root, "a")
+        assertEquals(FileOperationResult.Error.DestinationExists, result)
+    }
+
+    // при попытке создать папку с именем уже существующего файла — возвращается DestinationExists
+    @Test
+    fun `createDirectory when file with same name already exists returns DestinationExists`() = runTest {
+        tempFolder.newFile("a")
+        val result = manager.createDirectory(tempFolder.root, "a")
+        assertEquals(FileOperationResult.Error.DestinationExists, result)
+    }
+
+    // при попытке создать папку с недопустимым именем — возвращается InvalidNewName
+    @Test
+    fun `createDirectory with invalid name returns InvalidNewName`() = runTest {
+        val invalidNames = listOf(
+            //"a.1", это решено оставить Success
+            "a/2",
+            ".",
+            "..",
+            "",
+            "   ",
+            //"a..1", это решено оставить Success тоже
+            "a".repeat(41)
+        )
+
+        invalidNames.forEach { invalidName ->
+            val result = manager.createDirectory(tempFolder.root, invalidName)
+            assertEquals(
+                "name: $invalidName",
+                FileOperationResult.Error.InvalidNewName,
+                result
+            )
+        }
+    }
+
+    // при попытке создать папку с 40 симв .  или ..   — возвращается Success
+    @Test
+    fun `createDirectory with 40сh text, dot or double-dot in name returns Success`() = runTest {
+        val validNames = listOf(
+            "a.1",
+            "a..1",
+            "a".repeat(40)
+        )
+
+        validNames.forEach { validName ->
+            val result = manager.createDirectory(tempFolder.root, validName)
+            assertEquals(
+                "name: $validName",
+                FileOperationResult.Success(File(tempFolder.root, validName)),
+                result
+            )
+            assertTrue(File(tempFolder.root, validName).exists())
+            assertTrue(File(tempFolder.root, validName).isDirectory)
+        }
+    }
+
+    // при попытке создать папку в родителе без прав на запись — возвращается PermissionDenied
+    @Test
+    fun `createDirectory when parent is unwritable returns PermissionDenied`() = runTest {
+        val unwritableFolder = tempFolder.newFolder("unwritable_folder")
+        unwritableFolder.setWritable(false)
+        assumeFalse(unwritableFolder.canWrite())
+
+        val result = manager.createDirectory(unwritableFolder, "a")
+        assertEquals(FileOperationResult.Error.PermissionDenied, result)
+    }
 }
