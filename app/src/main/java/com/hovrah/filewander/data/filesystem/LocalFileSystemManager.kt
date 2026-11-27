@@ -3,6 +3,9 @@ package com.hovrah.filewander.data.filesystem
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Files.createDirectory
 
 // extension-функция для перезаписи "сырого" File -> FileItem
 fun File.toFileItem(): FileItem {
@@ -10,7 +13,7 @@ fun File.toFileItem(): FileItem {
     return FileItem(
         file = this,
         name = this.name,
-        size = if (isDir) 0 else this.length(), // для директорий длина обычно не определена
+        size = if (isDir) 0L else this.length(), // для директорий длина обычно не определена
         extension = if (isDir) "" else this.extension, // расширение файла
         lastModified = this.lastModified(), // время последнего изменения
         isDirectory = isDir
@@ -43,8 +46,55 @@ class LocalFileSystemManager(val dispatcher : CoroutineDispatcher) : FileSystemM
         parent: File,
         name: String,
         conflictStrategy: ConflictStrategy
-    ): FileOperationResult {
-        TODO("Not yet implemented")
+    ): FileOperationResult = withContext(dispatcher) {
+        if (!parent.exists()){
+            return@withContext FileOperationResult.Error.FileNotFound
+        }
+        if (parent.isFile){
+            return@withContext FileOperationResult.Error.NotADirectory
+        }
+        if (!parent.canWrite()){
+            return@withContext FileOperationResult.Error.PermissionDenied
+        }
+        if (name.contains("/") || name == "." || name == ".." || name.length > 40 || name.isBlank()){
+            return@withContext FileOperationResult.Error.InvalidNewName
+        }
+//        if (parent.usableSpace == 0L) {
+//            return@withContext FileOperationResult.Error.NotEnoughSpace
+//        }
+
+        val targetDir = File(parent, name)
+
+        if (targetDir.exists()) {
+            when (conflictStrategy) {
+                ConflictStrategy.FAIL_IF_EXISTS -> {
+                    return@withContext FileOperationResult.Error.DestinationExists
+                }
+
+                else -> {}
+            }
+        }
+
+        // повторные проверки того же самого тут ДОПУСТИМЫ
+        // ведь ФС может измениться между проверкой и использованием, по факту race condition,
+        // или другими словами TOCTOU (Time Of Check To Time Of Use).
+        return@withContext try {
+            val createdPath = createDirectory(targetDir.toPath())
+            FileOperationResult.Success(createdPath.toFile())
+        } catch (e: FileAlreadyExistsException) {
+            FileOperationResult.Error.DestinationExists
+        } catch (e: NoSuchFileException) {
+            FileOperationResult.Error.FileNotFound
+        } catch (e: AccessDeniedException) {
+            FileOperationResult.Error.PermissionDenied
+        } catch (e: IOException) {
+            // IOException может означать NotEnoughSpace
+            if (e.message?.contains("No space left", ignoreCase = true) == true) {
+                FileOperationResult.Error.NotEnoughSpace
+            } else {
+                FileOperationResult.Error.Unknown(e.message ?: "Failed to create directory")
+            }
+        }
     }
 
     override suspend fun renameFile(
